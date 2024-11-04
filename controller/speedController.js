@@ -1,29 +1,32 @@
 const ffmpeg = require('fluent-ffmpeg');
 const cloudinary = require('../lib/cloudinaryConfig');
-const fs = require('fs');
-const path = require('path');
 
 const speedController = async (req, res) => {
   const { speed } = req.body;
-  const tempFilePath = path.join(__dirname, '../uploads', `${Date.now()}_${req.file.originalname}`);
 
   try {
-    fs.writeFileSync(tempFilePath, req.file.buffer);
+    // Convert the buffer to a readable stream
+    const bufferStream = require('stream').Readable.from(req.file.buffer);
 
-    const outputFilePath = path.join(__dirname, '../uploads', `output_${Date.now()}.mp4`);
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempFilePath)
+    // Process the video with ffmpeg and upload directly to Cloudinary
+    const result = await new Promise((resolve, reject) => {
+      const cloudinaryUploadStream = cloudinary.uploader.upload_stream(
+        { resource_type: 'video' },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+
+      // Use fluent-ffmpeg to process the video
+      ffmpeg(bufferStream)
         .videoFilters(`setpts=${1 / speed}*PTS`)
-        .output(outputFilePath)
-        .on('end', resolve)
+        .pipe(cloudinaryUploadStream, { end: true }) // Pipe the processed video directly to Cloudinary
         .on('error', reject)
-        .run();
+        .on('end', () => {
+          console.log('Video processing finished successfully');
+        });
     });
-
-    const result = await cloudinary.uploader.upload(outputFilePath, { resource_type: 'video' });
-
-    fs.unlinkSync(tempFilePath);
-    fs.unlinkSync(outputFilePath);
 
     res.json({ videoUrl: result.secure_url });
   } catch (error) {
