@@ -36,7 +36,7 @@ const PORT = process.env.PORT || 5000;
 app.use(
   cors({
     origin: [
-      "https://converter-frontend-rosy.vercel.app",
+      "https://ffmpeg-backend.vercel.app",
       "http://localhost:3000",
       "http://localhost:3001",
     ],
@@ -86,7 +86,9 @@ app.post("/apply-filter", upload.single("video"), applyFilter);
 app.post('/convert/frame-rate', upload.single('video'), processFrameRate);
 app.post("/adjust-bitrate", upload.single("video"), adjustBitrate);
 
-
+app.get("/", (req, res) => {
+  res.send("Welcome to the Video Processing API!");
+});
 app.post(
   "/watermark",
   upload.fields([
