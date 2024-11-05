@@ -5,10 +5,6 @@ const path = require('path');
 const fs = require('fs');
 
 const extractFrames = async (req, res) => {
-    const tmpDir = os.tmpdir();
-    const tempVideoPath = path.join(tmpDir, `temp-${uuidv4()}.mp4`);
-    const tempFramesDir = path.join(tmpDir, `frames-${uuidv4()}`);
-    
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No video file provided' });
@@ -17,10 +13,16 @@ const extractFrames = async (req, res) => {
         const videoBuffer = req.file.buffer;
         const requestedFrames = parseInt(req.body.frameRate) || 1;
         
+        // Use OS temp directory instead of local directory
+        const tempDir = os.tmpdir();
+        const batchId = uuidv4();
+        const tempVideoPath = path.join(tempDir, `temp-${batchId}.mp4`);
+        const framesPath = path.join(tempDir, batchId);
+
         // Create temporary directory for frames
-        fs.mkdirSync(tempFramesDir, { recursive: true });
+        fs.mkdirSync(framesPath, { recursive: true });
         
-        // Write video buffer to temporary file
+        // Write video to temp directory
         fs.writeFileSync(tempVideoPath, videoBuffer);
 
         const getDuration = () => {
@@ -36,7 +38,9 @@ const extractFrames = async (req, res) => {
         const interval = duration / requestedFrames;
 
         // Extract frames
-        await new Promise((resolve, reject) => {
+        const frames = await new Promise((resolve, reject) => {
+            const extractedFrames = [];
+            
             ffmpeg(tempVideoPath)
                 .screenshots({
                     count: requestedFrames,
@@ -44,47 +48,64 @@ const extractFrames = async (req, res) => {
                         { length: requestedFrames }, 
                         (_, i) => Math.min(i * interval, duration - 0.001)
                     ),
-                    folder: tempFramesDir,
+                    folder: framesPath,
                     filename: 'frame-%d.jpg',
                     size: '480x?'
                 })
-                .on('end', resolve)
-                .on('error', reject);
+                .on('end', async () => {
+                    try {
+                        // Read frames and convert to base64
+                        const frameFiles = fs.readdirSync(framesPath)
+                            .filter(file => file.endsWith('.jpg'))
+                            .sort((a, b) => {
+                                const aNum = parseInt(a.match(/\d+/)[0]);
+                                const bNum = parseInt(b.match(/\d+/)[0]);
+                                return aNum - bNum;
+                            });
+
+                        for (const file of frameFiles) {
+                            const framePath = path.join(framesPath, file);
+                            const frameBuffer = fs.readFileSync(framePath);
+                            const base64Frame = frameBuffer.toString('base64');
+                            extractedFrames.push({
+                                filename: file,
+                                data: `data:image/jpeg;base64,${base64Frame}`
+                            });
+                            
+                            // Clean up frame file
+                            fs.unlinkSync(framePath);
+                        }
+
+                        // Clean up
+                        fs.unlinkSync(tempVideoPath);
+                        fs.rmdirSync(framesPath);
+                        
+                        resolve(extractedFrames);
+                    } catch (error) {
+                        reject(error);
+                    }
+                })
+                .on('error', (err) => {
+                    // Clean up on error
+                    if (fs.existsSync(tempVideoPath)) {
+                        fs.unlinkSync(tempVideoPath);
+                    }
+                    if (fs.existsSync(framesPath)) {
+                        fs.rmdirSync(framesPath, { recursive: true });
+                    }
+                    reject(err);
+                });
         });
-
-        // Read frames and convert to base64
-        const frames = fs.readdirSync(tempFramesDir)
-            .filter(file => file.endsWith('.jpg'))
-            .map(file => {
-                const framePath = path.join(tempFramesDir, file);
-                const frameBuffer = fs.readFileSync(framePath);
-                return `data:image/jpeg;base64,${frameBuffer.toString('base64')}`;
-            });
-
-        // Cleanup temporary files
-        fs.rmSync(tempVideoPath, { force: true });
-        fs.rmSync(tempFramesDir, { recursive: true, force: true });
 
         res.json({ 
             success: true, 
             frames,
-            count: frames.length 
+            batchId 
         });
 
     } catch (error) {
-        // Ensure cleanup on error
-        try {
-            fs.rmSync(tempVideoPath, { force: true });
-            fs.rmSync(tempFramesDir, { recursive: true, force: true });
-        } catch (cleanupError) {
-            console.error('Cleanup error:', cleanupError);
-        }
-
         console.error('Error extracting frames:', error);
-        res.status(500).json({ 
-            error: 'Failed to extract frames',
-            details: error.message 
-        });
+        res.status(500).json({ error: 'Failed to extract frames' });
     }
 };
 

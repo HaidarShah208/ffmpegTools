@@ -5,8 +5,8 @@
             "src": "server.js",
             "use": "@vercel/node",
             "config": {
-                "installCommand": "apt-get update && apt-get install -y ffmpeg"
-              }
+                "installCommand": "apt-get update && apt-get install -y ffmpeg && npm install"
+            }
         }
     ],
     "routes": [
@@ -14,5 +14,14 @@
             "src": "/(.*)",
             "dest": "/server.js"
         }
-    ]
+    ],
+    "functions": {
+        "server.js": {
+            "memory": 3008,
+            "maxDuration": 60
+        }
+    },
+    "env": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/ffmpeg/bin"
+    }
 }
