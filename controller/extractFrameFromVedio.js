@@ -1,12 +1,14 @@
-const ffmpegPath = require('ffmpeg-static'); // Static FFmpeg binary
 const ffmpeg = require('fluent-ffmpeg');
+const { v4: uuidv4 } = require('uuid');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
-
-ffmpeg.setFfmpegPath(ffmpegPath); // Set FFmpeg path for fluent-ffmpeg
 
 const extractFrames = async (req, res) => {
+    const tmpDir = os.tmpdir();
+    const tempVideoPath = path.join(tmpDir, `temp-${uuidv4()}.mp4`);
+    const tempFramesDir = path.join(tmpDir, `frames-${uuidv4()}`);
+    
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No video file provided' });
@@ -14,21 +16,12 @@ const extractFrames = async (req, res) => {
 
         const videoBuffer = req.file.buffer;
         const requestedFrames = parseInt(req.body.frameRate) || 1;
-
-        // Set /tmp directory for Vercel
-        const outputDir = path.join('/tmp', 'frames');
-        const tempVideoPath = path.join('/tmp', `temp-${uuidv4()}.mp4`);
-
-        // Create directories in /tmp
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
+        
+        // Create temporary directory for frames
+        fs.mkdirSync(tempFramesDir, { recursive: true });
+        
+        // Write video buffer to temporary file
         fs.writeFileSync(tempVideoPath, videoBuffer);
-
-        const batchId = uuidv4();
-        const framesPath = path.join(outputDir, batchId);
-        fs.mkdirSync(framesPath);
 
         const getDuration = () => {
             return new Promise((resolve, reject) => {
@@ -42,37 +35,56 @@ const extractFrames = async (req, res) => {
         const duration = await getDuration();
         const interval = duration / requestedFrames;
 
+        // Extract frames
         await new Promise((resolve, reject) => {
             ffmpeg(tempVideoPath)
                 .screenshots({
                     count: requestedFrames,
-                    timemarks: Array.from({ length: requestedFrames }, (_, i) => 
-                        Math.min(i * interval, duration - 0.001)
+                    timemarks: Array.from(
+                        { length: requestedFrames }, 
+                        (_, i) => Math.min(i * interval, duration - 0.001)
                     ),
-                    folder: framesPath,
+                    folder: tempFramesDir,
                     filename: 'frame-%d.jpg',
                     size: '480x?'
                 })
-                .on('end', () => {
-                    fs.unlinkSync(tempVideoPath); // Clean up temp file
-                    resolve();
-                })
-                .on('error', (err) => {
-                    fs.unlinkSync(tempVideoPath); // Clean up on error
-                    reject(err);
-                });
+                .on('end', resolve)
+                .on('error', reject);
         });
 
-        // Prepare frames URLs for response
-        const frames = fs.readdirSync(framesPath)
+        // Read frames and convert to base64
+        const frames = fs.readdirSync(tempFramesDir)
             .filter(file => file.endsWith('.jpg'))
-            .map(file => `/tmp/frames/${batchId}/${file}`);
+            .map(file => {
+                const framePath = path.join(tempFramesDir, file);
+                const frameBuffer = fs.readFileSync(framePath);
+                return `data:image/jpeg;base64,${frameBuffer.toString('base64')}`;
+            });
 
-        res.json({ success: true, frames, batchId });
+        // Cleanup temporary files
+        fs.rmSync(tempVideoPath, { force: true });
+        fs.rmSync(tempFramesDir, { recursive: true, force: true });
+
+        res.json({ 
+            success: true, 
+            frames,
+            count: frames.length 
+        });
 
     } catch (error) {
+        // Ensure cleanup on error
+        try {
+            fs.rmSync(tempVideoPath, { force: true });
+            fs.rmSync(tempFramesDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+            console.error('Cleanup error:', cleanupError);
+        }
+
         console.error('Error extracting frames:', error);
-        res.status(500).json({ error: 'Failed to extract frames' });
+        res.status(500).json({ 
+            error: 'Failed to extract frames',
+            details: error.message 
+        });
     }
 };
 
