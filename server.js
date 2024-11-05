@@ -36,7 +36,7 @@ const PORT = process.env.PORT || 5000;
 app.use(
   cors({
     origin: [
-      "https://ffmpeg-backend.vercel.app",
+      "https://ffmpeg-backend.vercel.app/",
       "http://localhost:3000",
       "http://localhost:3001",
     ],
