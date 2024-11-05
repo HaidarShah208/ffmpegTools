@@ -10,10 +10,13 @@ const extractFrames = async (req, res) => {
         }
 
         const videoBuffer = req.file.buffer;
-        const requestedFrames = parseInt(req.body.frameRate) || 1; 
-        const outputDir = path.join(__dirname, '../uploads/frames');
-        const tempVideoPath = path.join(__dirname, `../uploads/temp-${uuidv4()}.mp4`);
+        const requestedFrames = parseInt(req.body.frameRate) || 1;
+        
+        // Use /tmp directory for temporary files in Vercel
+        const outputDir = path.join('/tmp', 'frames');
+        const tempVideoPath = path.join('/tmp', `temp-${uuidv4()}.mp4`);
 
+        // Create necessary directories in /tmp
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
@@ -34,7 +37,6 @@ const extractFrames = async (req, res) => {
         };
 
         const duration = await getDuration();
-
         const interval = duration / requestedFrames;
 
         await new Promise((resolve, reject) => {
@@ -42,7 +44,7 @@ const extractFrames = async (req, res) => {
                 .screenshots({
                     count: requestedFrames,
                     timemarks: Array.from({ length: requestedFrames }, (_, i) => 
-                        Math.min(i * interval, duration - 0.001)  
+                        Math.min(i * interval, duration - 0.001)
                     ),
                     folder: framesPath,
                     filename: 'frame-%d.jpg',
@@ -60,7 +62,7 @@ const extractFrames = async (req, res) => {
 
         const frames = fs.readdirSync(framesPath)
             .filter(file => file.endsWith('.jpg'))
-            .map(file => `/uploads/frames/${batchId}/${file}`);
+            .map(file => `/tmp/frames/${batchId}/${file}`);
 
         res.json({ success: true, frames, batchId });
 
