@@ -1,7 +1,10 @@
+const ffmpegPath = require('ffmpeg-static'); // Static FFmpeg binary
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+
+ffmpeg.setFfmpegPath(ffmpegPath); // Set FFmpeg path for fluent-ffmpeg
 
 const extractFrames = async (req, res) => {
     try {
@@ -11,12 +14,12 @@ const extractFrames = async (req, res) => {
 
         const videoBuffer = req.file.buffer;
         const requestedFrames = parseInt(req.body.frameRate) || 1;
-        
-        // Use /tmp directory for temporary files in Vercel
+
+        // Set /tmp directory for Vercel
         const outputDir = path.join('/tmp', 'frames');
         const tempVideoPath = path.join('/tmp', `temp-${uuidv4()}.mp4`);
 
-        // Create necessary directories in /tmp
+        // Create directories in /tmp
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
@@ -51,15 +54,16 @@ const extractFrames = async (req, res) => {
                     size: '480x?'
                 })
                 .on('end', () => {
-                    fs.unlinkSync(tempVideoPath);
+                    fs.unlinkSync(tempVideoPath); // Clean up temp file
                     resolve();
                 })
                 .on('error', (err) => {
-                    fs.unlinkSync(tempVideoPath);
+                    fs.unlinkSync(tempVideoPath); // Clean up on error
                     reject(err);
                 });
         });
 
+        // Prepare frames URLs for response
         const frames = fs.readdirSync(framesPath)
             .filter(file => file.endsWith('.jpg'))
             .map(file => `/tmp/frames/${batchId}/${file}`);
